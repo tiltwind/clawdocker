@@ -10,6 +10,7 @@ set -euo pipefail
 #   clawdocker.sh status [path]       - Show instance status
 #   clawdocker.sh logs   [path]       - Tail instance logs
 #   clawdocker.sh list                - List all instances
+#   clawdocker.sh channel feishu <path|name> - Configure Feishu channel
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTANCES_REGISTRY="${SCRIPT_DIR}/.instances"
@@ -178,7 +179,7 @@ cmd_create() {
     cat > "$instance_path/docker-compose.yml" << EOF
 services:
   openclaw-gateway:
-    image: openclaw-gateway:latest
+    image: openclaw:local
     container_name: openclaw-${name}
     restart: unless-stopped
     ports:
@@ -429,6 +430,194 @@ cmd_list() {
     echo ""
 }
 
+cmd_channel_feishu() {
+    # Ref: https://docs.openclaw.ai/channels/feishu
+    local input="${1:-}"
+    if [[ -z "$input" ]]; then
+        error "Usage: $0 channel feishu <path|name>"
+        exit 1
+    fi
+
+    local instance_path
+    instance_path=$(resolve_instance_path "$input")
+
+    if [[ ! -f "$instance_path/config/openclaw.json" ]]; then
+        error "No openclaw.json found at: $instance_path/config/"
+        error "Run '$0 create' first."
+        exit 1
+    fi
+
+    # Check jq availability
+    if ! command -v jq &>/dev/null; then
+        error "jq is required for channel configuration. Install it with: brew install jq (macOS) or apt install jq (Debian)"
+        exit 1
+    fi
+
+    local config_file="$instance_path/config/openclaw.json"
+
+    echo ""
+    echo "$(color_green '╔══════════════════════════════════════════╗')"
+    echo "$(color_green '║')   Configure Feishu Channel               $(color_green '║')"
+    echo "$(color_green '╚══════════════════════════════════════════╝')"
+    echo ""
+    echo "  Ref: https://docs.openclaw.ai/channels/feishu"
+    echo ""
+
+    # Read existing feishu config as defaults
+    # Channel-level settings are at .channels.feishu
+    # Account-level settings are at .channels.feishu.accounts.<name>
+    local existing_appid="" existing_appsecret="" existing_domain="feishu"
+    local existing_connmode="websocket" existing_dmpolicy="pairing"
+    local existing_grouppolicy="open" existing_requiremention="true"
+    local existing_allowfrom="" existing_groupallowfrom=""
+
+    if jq -e '.channels.feishu' "$config_file" &>/dev/null; then
+        info "Found existing Feishu configuration, using as defaults."
+        existing_domain=$(jq -r '.channels.feishu.domain // "feishu"' "$config_file")
+        existing_connmode=$(jq -r '.channels.feishu.connectionMode // "websocket"' "$config_file")
+        existing_dmpolicy=$(jq -r '.channels.feishu.dmPolicy // "pairing"' "$config_file")
+        existing_grouppolicy=$(jq -r '.channels.feishu.groupPolicy // "open"' "$config_file")
+        existing_requiremention=$(jq -r '.channels.feishu.requireMention // "true"' "$config_file")
+        existing_allowfrom=$(jq -r '(.channels.feishu.allowFrom // []) | join(",")' "$config_file")
+        existing_groupallowfrom=$(jq -r '(.channels.feishu.groupAllowFrom // []) | join(",")' "$config_file")
+        # Account-level: try "main" first, then "default"
+        local acct_path=".channels.feishu.accounts.main"
+        if ! jq -e "$acct_path" "$config_file" &>/dev/null; then
+            acct_path=".channels.feishu.accounts.default"
+        fi
+        if jq -e "$acct_path" "$config_file" &>/dev/null; then
+            existing_appid=$(jq -r "${acct_path}.appId // \"\"" "$config_file")
+            existing_appsecret=$(jq -r "${acct_path}.appSecret // \"\"" "$config_file")
+        fi
+    fi
+
+    # Interactive prompts
+    local appid appsecret domain connmode dmpolicy grouppolicy
+    local requiremention allowfrom_str groupallowfrom_str
+
+    if [[ -n "$existing_appid" ]]; then
+        appid=$(prompt_input "App ID" "$existing_appid")
+    else
+        appid=$(prompt_input "App ID" "")
+    fi
+
+    if [[ -n "$existing_appsecret" ]]; then
+        appsecret=$(prompt_input "App Secret" "$existing_appsecret")
+    else
+        appsecret=$(prompt_input "App Secret" "")
+    fi
+
+    domain=$(prompt_choice "Domain (feishu=国内, lark=国际版)" "$existing_domain" "feishu" "lark")
+    connmode=$(prompt_choice "Connection Mode" "$existing_connmode" "websocket" "webhook")
+    dmpolicy=$(prompt_choice "DM Policy" "$existing_dmpolicy" "pairing" "allowlist" "open" "disabled")
+    grouppolicy=$(prompt_choice "Group Policy" "$existing_grouppolicy" "open" "allowlist" "disabled")
+    requiremention=$(prompt_choice "Require @mention in groups" "$existing_requiremention" "true" "false")
+
+    allowfrom_str=$(prompt_input "DM allowFrom (comma-separated Open IDs, empty to skip)" "${existing_allowfrom:-}")
+    groupallowfrom_str=$(prompt_input "Group allowFrom (comma-separated chat IDs, empty to skip)" "${existing_groupallowfrom:-}")
+
+    # Build JSON arrays
+    local allowfrom_json="[]" groupallowfrom_json="[]"
+    if [[ -n "$allowfrom_str" ]]; then
+        allowfrom_json=$(echo "$allowfrom_str" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s .)
+    fi
+    if [[ -n "$groupallowfrom_str" ]]; then
+        groupallowfrom_json=$(echo "$groupallowfrom_str" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s .)
+    fi
+
+    # Convert requiremention string to boolean
+    local require_bool=true
+    if [[ "$requiremention" == "false" ]]; then
+        require_bool=false
+    fi
+
+    # Build the feishu channel-level config
+    local feishu_channel
+    feishu_channel=$(jq -n \
+        --arg domain "$domain" \
+        --arg connectionMode "$connmode" \
+        --arg dmPolicy "$dmpolicy" \
+        --arg groupPolicy "$grouppolicy" \
+        --argjson requireMention "$require_bool" \
+        --argjson allowFrom "$allowfrom_json" \
+        --argjson groupAllowFrom "$groupallowfrom_json" \
+        --arg appId "$appid" \
+        --arg appSecret "$appsecret" \
+        '{
+            enabled: true,
+            domain: $domain,
+            connectionMode: $connectionMode,
+            dmPolicy: $dmPolicy,
+            groupPolicy: $groupPolicy,
+            requireMention: $requireMention,
+            allowFrom: $allowFrom,
+            groupAllowFrom: $groupAllowFrom,
+            accounts: {
+                main: {
+                    appId: $appId,
+                    appSecret: $appSecret
+                }
+            }
+        }')
+
+    # Remove empty arrays to keep config clean
+    feishu_channel=$(echo "$feishu_channel" | jq '
+        if (.allowFrom | length) == 0 then del(.allowFrom) else . end |
+        if (.groupAllowFrom | length) == 0 then del(.groupAllowFrom) else . end
+    ')
+
+    # Merge into openclaw.json, preserving existing channels and feishu sub-keys (e.g. groups)
+    local updated
+    updated=$(jq --argjson feishu "$feishu_channel" '
+        .channels = (.channels // {}) |
+        .channels.feishu = ((.channels.feishu // {}) * $feishu)
+    ' "$config_file")
+
+    echo "$updated" > "$config_file"
+
+    # Also update .env with FEISHU env vars
+    local env_file="$instance_path/.env"
+    if [[ -f "$env_file" ]]; then
+        # Remove old FEISHU_ lines if present
+        sed -i.bak '/^FEISHU_APP_ID=/d;/^FEISHU_APP_SECRET=/d' "$env_file" && rm -f "${env_file}.bak"
+        # Append new values
+        echo "FEISHU_APP_ID=${appid}" >> "$env_file"
+        echo "FEISHU_APP_SECRET=${appsecret}" >> "$env_file"
+    fi
+
+    echo ""
+    info "Feishu channel configured successfully!"
+    echo ""
+    echo "  App ID:           $appid"
+    echo "  Domain:           $domain"
+    echo "  Connection Mode:  $connmode"
+    echo "  DM Policy:        $dmpolicy"
+    echo "  Group Policy:     $grouppolicy"
+    echo "  Require Mention:  $requiremention"
+    if [[ -n "$allowfrom_str" ]]; then
+        echo "  DM allowFrom:     $allowfrom_str"
+    fi
+    if [[ -n "$groupallowfrom_str" ]]; then
+        echo "  Group allowFrom:  $groupallowfrom_str"
+    fi
+    echo ""
+    echo "  Config: $config_file"
+    echo "  Ref:    https://docs.openclaw.ai/channels/feishu"
+    echo ""
+
+    # Restart docker instance
+    local project
+    project=$(get_compose_project "$instance_path")
+
+    if docker compose -p "$project" ps --status running 2>/dev/null | grep -q "openclaw"; then
+        info "Restarting instance: $project ..."
+        cd "$instance_path" && docker compose -p "$project" restart
+        info "Instance restarted."
+    else
+        warn "Instance is not running. Start it with: $0 start $input"
+    fi
+}
+
 cmd_help() {
     echo ""
     echo "$(color_green 'clawdocker') - OpenClaw Docker Instance Manager"
@@ -441,6 +630,7 @@ cmd_help() {
     echo "  $0 $(color_cyan 'status')  <path|name>  Show instance status"
     echo "  $0 $(color_cyan 'logs')    <path|name>  Tail instance logs"
     echo "  $0 $(color_cyan 'list')                 List all registered instances"
+    echo "  $0 $(color_cyan 'channel feishu') <path|name>  Configure Feishu channel (ref: docs.openclaw.ai/channels/feishu)"
     echo ""
 }
 
@@ -457,6 +647,17 @@ case "$command" in
     status)  cmd_status "$@" ;;
     logs)    cmd_logs "$@" ;;
     list)    cmd_list "$@" ;;
+    channel)
+        subcmd="${1:-}"
+        shift || true
+        case "$subcmd" in
+            feishu) cmd_channel_feishu "$@" ;;
+            *)
+                error "Unknown channel: $subcmd (supported: feishu)"
+                exit 1
+                ;;
+        esac
+        ;;
     help|--help|-h) cmd_help ;;
     *)
         error "Unknown command: $command"
