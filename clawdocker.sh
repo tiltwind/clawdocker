@@ -223,7 +223,7 @@ EOF
     echo ""
     echo "  Next steps:"
     echo "    1. Start:     $(color_cyan "$0 start $name")"
-    echo "    2. Configure: $(color_cyan "$0 exec $name openclaw dashboard")"
+    echo "    2. Configure: $(color_cyan "$0 exec $name openclaw onboard")"
     echo ""
 }
 

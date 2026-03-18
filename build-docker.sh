@@ -18,7 +18,9 @@ OPENCLAW_REPO_DIR="${OPENCLAW_REPO_DIR:-/opt/openclaw}"
 OPENCLAW_BRANCH="${OPENCLAW_BRANCH:-main}"
 
 # Extensions to include (space-separated)
-export OPENCLAW_EXTENSIONS="${OPENCLAW_EXTENSIONS:-nostr}"
+# These are all non-private extensions that have external npm dependencies.
+# Without them, `openclaw onboard` and channel setup will fail with MODULE_NOT_FOUND.
+export OPENCLAW_EXTENSIONS="${OPENCLAW_EXTENSIONS:-acpx bluebubbles diagnostics-otel feishu irc lobster matrix mattermost msteams nextcloud-talk nostr synology-chat tlon twitch voice-call zalo zalouser}"
 
 # Extra apt packages to install in the image
 export OPENCLAW_DOCKER_APT_PACKAGES="${OPENCLAW_DOCKER_APT_PACKAGES:-ffmpeg build-essential git curl jq}"
