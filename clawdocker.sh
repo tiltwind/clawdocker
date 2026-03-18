@@ -167,7 +167,7 @@ cmd_create() {
     local images=()
     while IFS= read -r img; do
         [[ -n "$img" ]] && images+=("$img")
-    done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -i '^openclaw:' | sort -V)
+    done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -i 'openclaw:' | sort -V)
 
     local image
     if [[ ${#images[@]} -eq 0 ]]; then
