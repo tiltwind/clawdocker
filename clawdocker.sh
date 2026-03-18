@@ -176,7 +176,7 @@ services:
     container_name: openclaw-${name}
     restart: unless-stopped
     ports:
-      - "${port}:18789"
+      - "127.0.0.1:${port}:18789"
     volumes:
       - ./config:/home/node/.openclaw:rw
       - ${name}_home:/home/node
