@@ -12,6 +12,7 @@ set -euo pipefail
 #   clawdocker.sh list                - List all instances
 #   clawdocker.sh remove <path|name>  - Remove an instance (stop, delete, unregister)
 #   clawdocker.sh exec   <path|name> <command...> - Execute a command inside the container
+#   clawdocker.sh pullimage                      - Pull community Docker image
 #   clawdocker.sh buildimage [--skip-clone]      - Clone/update OpenClaw repo and build Docker image
 #   clawdocker.sh uninstall                       - Uninstall OpenClaw (systemd, CLI, config)
 
@@ -485,6 +486,40 @@ cmd_remove() {
     info "Instance '${name}' removed."
 }
 
+cmd_pull_image() {
+    echo ""
+    echo "$(color_green '╔══════════════════════════════════════════╗')"
+    echo "$(color_green '║')   Pull Community OpenClaw Image           $(color_green '║')"
+    echo "$(color_green '╚══════════════════════════════════════════╝')"
+    echo ""
+
+    if ! command -v docker &>/dev/null; then
+        error "Docker is not installed. Please install Docker first."
+        return 1
+    fi
+
+    local images=("alpine/openclaw" "1panel/openclaw")
+    local image
+    image=$(prompt_choice "Select community image:" "${images[0]}" "${images[@]}")
+
+    echo ""
+    info "Pulling latest version of: $image"
+    docker pull "${image}:latest"
+
+    # Tag as openclaw:latest for convenience
+    info "Tagging ${image}:latest -> openclaw:latest"
+    docker tag "${image}:latest" "openclaw:latest"
+
+    echo ""
+    info "Done. Image available:"
+    echo "  ${image}:latest"
+    echo "  openclaw:latest"
+    echo ""
+    echo "  Next step:"
+    echo "    $(color_cyan "$0 create")"
+    echo ""
+}
+
 cmd_uninstall() {
     echo ""
     echo "$(color_red '╔══════════════════════════════════════════╗')"
@@ -709,6 +744,7 @@ cmd_help() {
     echo "  $0 $(color_cyan 'list')                 List all registered instances"
     echo "  $0 $(color_cyan 'remove')  <path|name>  Remove an instance (stop, delete files, unregister)"
     echo "  $0 $(color_cyan 'exec')    <path|name> <cmd...>  Execute a command inside the container"
+    echo "  $0 $(color_cyan 'pullimage')                    Pull community Docker image"
     echo "  $0 $(color_cyan 'buildimage') [--skip-clone]   Clone/update OpenClaw repo and build Docker image"
     echo "  $0 $(color_cyan 'uninstall')                  Uninstall OpenClaw (systemd, CLI, config)"
     echo ""
@@ -729,7 +765,8 @@ case "$command" in
     list)    cmd_list "$@" ;;
     remove)  cmd_remove "$@" ;;
     exec)        cmd_exec "$@" ;;
-    buildimage) cmd_build_image "$@" ;;
+    pullimage)   cmd_pull_image "$@" ;;
+    buildimage)  cmd_build_image "$@" ;;
     uninstall)   cmd_uninstall "$@" ;;
     help|--help|-h) cmd_help ;;
     *)

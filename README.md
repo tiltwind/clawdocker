@@ -8,12 +8,6 @@ OpenClaw Docker instance manager. Build images, create/manage multiple OpenClaw 
 curl -fsSL https://raw.githubusercontent.com/tiltwind/clawdocker/main/install.sh | bash
 ```
 
-Or specify a custom install directory:
-
-```bash
-CLAWDOCKER_HOME=/path/to/dir curl -fsSL https://raw.githubusercontent.com/tiltwind/clawdocker/main/install.sh | bash
-```
-
 ## Usage
 
 ```
@@ -24,6 +18,7 @@ clawdocker <command> [options]
 
 | Command | Description |
 |---|---|
+| `clawdocker pullimage` | Pull community Docker image (alpine/openclaw, 1panel/openclaw) |
 | `clawdocker buildimage [--skip-clone]` | Clone/update OpenClaw repo and build Docker image |
 | `clawdocker create` | Create a new instance interactively |
 | `clawdocker start <name>` | Start an instance |
@@ -40,8 +35,8 @@ clawdocker <command> [options]
 ### Quick start
 
 ```bash
-# 1. Build the Docker image
-clawdocker buildimage
+# 1. Pull community image (or use `clawdocker buildimage` to build from source)
+clawdocker pullimage
 
 # 2. Create an instance
 clawdocker create
