@@ -102,8 +102,8 @@ if [[ "$SKIP_CLONE" == false ]]; then
         info "Using specified ref: $OPENCLAW_BRANCH"
         git checkout "$OPENCLAW_BRANCH"
     else
-        # Auto-detect latest release tag (sorted by version number)
-        LATEST_TAG="$(git tag -l --sort=-version:refname | head -n 1)"
+        # Auto-detect latest stable release tag (exclude beta/rc/alpha/dev)
+        LATEST_TAG="$(git tag -l --sort=-version:refname | grep -v -iE '(alpha|beta|rc|dev|pre)' | head -n 1)"
         if [[ -z "$LATEST_TAG" ]]; then
             error "No release tags found. Falling back to main."
             OPENCLAW_BRANCH="main"
