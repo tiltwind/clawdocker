@@ -88,19 +88,40 @@ cd /opt/openclaw-instances
 
 # 交互式创建实例
 ./clawdocker.sh create
-# Instance name: deepseek
-# Instance path: /opt/openclaw-instances/deepseek
-# Host port: 18789
+# Instance name: deep
+# Instance path: /opt/clawdocker/deep
+# Host port: 18001
+
 ```
 
 ### STEP 2. 启动并配置
 
 ```bash
 # 启动实例
-./clawdocker.sh start deepseek
+./clawdocker.sh start deep
+# [INFO]  Starting instance at: /opt/clawdocker/deep (project: openclaw-deep)
+# [+] up 3/3
+#  ✔ Network openclaw-deep_default  Created   0.2s
+#  ✔ Volume openclaw-deep_deep_home Created   0.1s
+#  ✔ Container openclaw-deep        Started   1.4s
+# [INFO]  Instance started. Gateway port: 18001 
 
 # 进入容器内交互式完成基本配置（Provider、API Key、Model 等）
-./clawdocker.sh exec deepseek openclaw setup
+./clawdocker.sh exec deep openclaw dashboard
+# Dashboard URL: http://127.0.0.1:18789/#token=69360a4af148744137678cbf95174a9d
+# Copy to clipboard unavailable.
+# No GUI detected. Open from your computer:
+# ssh -N -L 18789:127.0.0.1:18789 user@<host>
+# Then open:
+# http://localhost:18789/
+# http://localhost:18789/#token=69360a4af148744137678cbf95174a9d
+# Docs:
+# https://docs.openclaw.ai/gateway/remote
+# https://docs.openclaw.ai/web/control-ui
+
+# 本地端口转发（将本地 18789 端口映射到远程 18001
+ssh -N -L 18789:127.0.0.1:18001 root@10.225.32.180
+
 ```
 
 ### STEP 3. 常用管理命令

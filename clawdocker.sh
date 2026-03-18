@@ -202,7 +202,8 @@ EOF
 EOF
 
     # Ensure container's node user (uid 1000) can read/write/create in config
-    chmod -R a+rwX "$instance_path/config"
+    chown -R 1000:1000 "$instance_path/config" 2>/dev/null || true
+    chmod -R 700 "$instance_path/config"
 
     # --- instance.conf (metadata) ---
     cat > "$instance_path/instance.conf" << EOF
