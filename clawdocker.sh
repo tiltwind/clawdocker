@@ -208,20 +208,24 @@ EOF
     fi
 
     # --- openclaw.json ---
+    # Uses agents.defaults.* format (agent.* is legacy, see openclaw doctor)
     if [[ "$provider" == "openai" ]]; then
         cat > "$instance_path/config/openclaw.json" << EOF
 {
-  "agent": {
-    "model": "openai-compatible:${model}",
-    "providers": {
-      "openai-compatible": {
-        "baseUrl": "${baseurl}"
-      }
-    },
-    "workspace": "~/.openclaw/workspace"
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai-compatible/${model}"
+      },
+      "providers": {
+        "openai-compatible": {
+          "baseUrl": "${baseurl}"
+        }
+      },
+      "workspace": "~/.openclaw/workspace"
+    }
   },
   "gateway": {
-    "host": "0.0.0.0",
     "port": 18789
   }
 }
@@ -229,17 +233,20 @@ EOF
     else
         cat > "$instance_path/config/openclaw.json" << EOF
 {
-  "agent": {
-    "model": "anthropic:${model}",
-    "providers": {
-      "anthropic": {
-        "baseUrl": "${baseurl}"
-      }
-    },
-    "workspace": "~/.openclaw/workspace"
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "anthropic/${model}"
+      },
+      "providers": {
+        "anthropic": {
+          "baseUrl": "${baseurl}"
+        }
+      },
+      "workspace": "~/.openclaw/workspace"
+    }
   },
   "gateway": {
-    "host": "0.0.0.0",
     "port": 18789
   }
 }
