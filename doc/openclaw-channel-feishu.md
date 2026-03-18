@@ -101,53 +101,12 @@ markmeta_tags: ai,openclaw,agent,feishu,lark
 
 ## STEP 6. 配置 OpenClaw
 
-**方式一：使用 clawdocker 脚本（推荐）**
-
 ```bash
-# 交互式配置飞书渠道
-./clawdocker.sh channel feishu <实例路径或名称>
-```
+# 交互式配置（不带额外参数时，openclaw 进入交互模式）
+./clawdocker.sh exec <实例名称> openclaw channels set feishu
 
-脚本会引导你输入 App ID、App Secret，选择连接模式和访问策略，自动更新 `openclaw.json` 和 `.env`。
-
-**方式二：手动配置**
-
-编辑 `~/.openclaw/openclaw.json`（或实例的 `config/openclaw.json`），添加飞书渠道配置：
-
-```json5
-{
-  // ... 其他配置 ...
-
-  "channels": {
-    "feishu": {
-      "enabled": true,
-      "domain": "feishu",              // "feishu"=国内版, "lark"=国际版(Lark)
-      "connectionMode": "websocket",   // "websocket" 或 "webhook"
-      "dmPolicy": "pairing",           // 私聊策略: "pairing"(配对审批), "allowlist"(白名单), "open"(开放)
-      "groupPolicy": "open",           // 群组策略: "open"(开放), "allowlist"(白名单), "disabled"(禁用)
-      "requireMention": true,          // 群组中是否需要 @mention 才响应
-      "accounts": {
-        "main": {
-          "appId": "<YOUR_APP_ID>",
-          "appSecret": "<YOUR_APP_SECRET>"
-        }
-      }
-    }
-  }
-}
-```
-
-同时在 `.env` 文件中添加：
-
-```bash
-FEISHU_APP_ID=<YOUR_APP_ID>
-FEISHU_APP_SECRET=<YOUR_APP_SECRET>
-```
-
-**方式三：使用 OpenClaw CLI**
-
-```bash
-openclaw channels add --channel feishu \
+# 也可以直接传参
+./clawdocker.sh exec <实例名称> openclaw channels set feishu \
   --app-id "<YOUR_APP_ID>" \
   --app-secret "<YOUR_APP_SECRET>"
 ```
@@ -156,17 +115,10 @@ openclaw channels add --channel feishu \
 
 ```bash
 # 重启 OpenClaw 使配置生效
-# Docker 方式
-docker compose -p openclaw-<name> restart
-
-# 或使用 clawdocker
 ./clawdocker.sh restart <实例名称>
 
-# 或 systemd 方式
-systemctl --user restart openclaw
-
 # 检查飞书渠道连接状态
-openclaw channels status --probe
+./clawdocker.sh exec <实例名称> openclaw channels status --probe
 ```
 
 验证步骤：
@@ -174,8 +126,8 @@ openclaw channels status --probe
 2. 向机器人发送一条私聊消息（如 "你好"）
 3. 如果 `dmPolicy` 为 `pairing`（默认），你需要先完成配对：
    - 机器人会回复一个配对码
-   - 在终端执行 `openclaw devices list` 查看待审批请求
-   - 执行 `openclaw devices approve <requestId>` 批准配对
+   - 在终端执行 `./clawdocker.sh exec <实例名称> openclaw devices list` 查看待审批请求
+   - 执行 `./clawdocker.sh exec <实例名称> openclaw devices approve <requestId>` 批准配对
 4. 配对完成后，再次发送消息，机器人应正常回复
 
 ## 配置参数说明
