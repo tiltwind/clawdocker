@@ -163,6 +163,23 @@ cmd_create() {
         exit 1
     fi
 
+    # 4. Image selection
+    local images=()
+    while IFS= read -r img; do
+        [[ -n "$img" ]] && images+=("$img")
+    done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -i '^openclaw:' | sort -V)
+
+    local image
+    if [[ ${#images[@]} -eq 0 ]]; then
+        warn "No openclaw images found locally."
+        image=$(prompt_input "Docker image" "openclaw:latest")
+    elif [[ ${#images[@]} -eq 1 ]]; then
+        info "Found image: ${images[0]}"
+        image="${images[0]}"
+    else
+        image=$(prompt_choice "Select Docker image:" "${images[0]}" "${images[@]}")
+    fi
+
     # ─── Generate files ───────────────────────────────────────────────────────
 
     info "Creating instance at: $instance_path"
@@ -172,7 +189,7 @@ cmd_create() {
     cat > "$instance_path/docker-compose.yml" << EOF
 services:
   openclaw-gateway:
-    image: openclaw:local
+    image: ${image}
     container_name: openclaw-${name}
     restart: unless-stopped
     ports:
@@ -209,6 +226,7 @@ EOF
     cat > "$instance_path/instance.conf" << EOF
 NAME=${name}
 PORT=${port}
+IMAGE=${image}
 CREATED=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 EOF
 
@@ -220,6 +238,7 @@ EOF
     echo ""
     echo "  Path:  $instance_path"
     echo "  Port:  $port"
+    echo "  Image: $image"
     echo ""
     echo "  Next steps:"
     echo "    1. Start:     $(color_cyan "$0 start $name")"

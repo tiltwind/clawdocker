@@ -40,6 +40,30 @@ cd openclaw
 
 `docker-setup.sh` 会完成：构建 Gateway 镜像、运行 onboard、生成 `.env`（含 Gateway Token）、启动 Docker Compose
 
+### 社区预构建镜像
+
+如果不想自行构建，可以直接使用社区已构建好的 Docker 镜像：
+
+| 镜像 | 说明 |
+|------|------|
+| `alpine/openclaw` | Alpine 社区维护，体积较小 |
+| `1panel/openclaw` | 1Panel 社区维护，适合 1Panel 面板用户 |
+
+使用预构建镜像启动：
+
+```bash
+# 以 alpine/openclaw 为例
+docker run -d --name openclaw \
+  -p 18789:18789 \
+  -v openclaw_data:/home/node/.openclaw \
+  alpine/openclaw
+
+# 或修改 docker-compose.yml 中的 image 字段
+# image: alpine/openclaw
+```
+
+> 社区镜像由第三方维护，更新频率和包含的扩展可能与官方不同，请根据需求选择。
+
 ### STEP 3. 常用操作
 
 ```bash

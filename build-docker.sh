@@ -20,7 +20,7 @@ OPENCLAW_BRANCH="${OPENCLAW_BRANCH:-}"  # empty = auto-detect latest release tag
 # Extensions to include (space-separated)
 # These are all non-private extensions that have external npm dependencies.
 # Without them, `openclaw onboard` and channel setup will fail with MODULE_NOT_FOUND.
-export OPENCLAW_EXTENSIONS="${OPENCLAW_EXTENSIONS:-acpx bluebubbles diagnostics-otel feishu irc lobster matrix mattermost msteams nextcloud-talk nostr synology-chat tlon twitch voice-call zalo zalouser}"
+export OPENCLAW_EXTENSIONS="${OPENCLAW_EXTENSIONS:-acpx bluebubbles diagnostics-otel feishu irc lobster matrix mattermost msteams nextcloud-talk nostr synology-chat twitch voice-call zalo zalouser}"
 
 # Extra apt packages to install in the image
 export OPENCLAW_DOCKER_APT_PACKAGES="${OPENCLAW_DOCKER_APT_PACKAGES:-ffmpeg build-essential git curl jq}"
