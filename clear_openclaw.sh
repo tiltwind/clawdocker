@@ -28,13 +28,15 @@ echo "  配置文件已清理"
 
 # STEP 4. 验证卸载
 echo "[4/4] 验证卸载..."
-if command -v openclaw &>/dev/null; then
+# 刷新 shell 的命令缓存
+hash -r 2>/dev/null
+if which openclaw 2>/dev/null | grep -q openclaw; then
     echo "  ⚠ openclaw 命令仍然存在: $(which openclaw)"
 else
     echo "  openclaw 命令已移除"
 fi
 
-if systemctl --user status openclaw-gateway &>/dev/null; then
+if systemctl --user list-unit-files openclaw-gateway.service 2>/dev/null | grep -q openclaw-gateway; then
     echo "  ⚠ openclaw-gateway 服务仍然存在"
 else
     echo "  openclaw-gateway 服务已移除"
