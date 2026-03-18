@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # OpenClaw repo
 OPENCLAW_REPO_URL="${OPENCLAW_REPO_URL:-https://github.com/openclaw/openclaw.git}"
 OPENCLAW_REPO_DIR="${OPENCLAW_REPO_DIR:-/opt/openclaw}"
-OPENCLAW_BRANCH="${OPENCLAW_BRANCH:-main}"
+OPENCLAW_BRANCH="${OPENCLAW_BRANCH:-}"  # empty = auto-detect latest release tag
 
 # Extensions to include (space-separated)
 # These are all non-private extensions that have external npm dependencies.
@@ -52,7 +52,7 @@ for arg in "$@"; do
             echo "Environment variables:"
             echo "  OPENCLAW_REPO_URL          Git repo URL (default: github.com/openclaw/openclaw)"
             echo "  OPENCLAW_REPO_DIR          Local repo path (default: /opt/openclaw)"
-            echo "  OPENCLAW_BRANCH            Git branch (default: main)"
+            echo "  OPENCLAW_BRANCH            Git branch/tag (default: latest release tag)"
             echo "  OPENCLAW_EXTENSIONS        Extensions to include (default: nostr)"
             echo "  OPENCLAW_DOCKER_APT_PACKAGES  Extra apt packages (default: ffmpeg build-essential git curl jq)"
             echo "  OPENCLAW_GATEWAY_BIND      Gateway bind mode (default: lan)"
@@ -89,13 +89,30 @@ if [[ "$SKIP_CLONE" == false ]]; then
     if [[ -d "$OPENCLAW_REPO_DIR/.git" ]]; then
         info "Updating existing repo at: $OPENCLAW_REPO_DIR"
         cd "$OPENCLAW_REPO_DIR"
-        git fetch origin
-        git checkout "$OPENCLAW_BRANCH"
-        git pull origin "$OPENCLAW_BRANCH"
+        git fetch origin --tags
     else
         info "Cloning OpenClaw to: $OPENCLAW_REPO_DIR"
         mkdir -p "$(dirname "$OPENCLAW_REPO_DIR")"
-        git clone --branch "$OPENCLAW_BRANCH" "$OPENCLAW_REPO_URL" "$OPENCLAW_REPO_DIR"
+        git clone "$OPENCLAW_REPO_URL" "$OPENCLAW_REPO_DIR"
+        cd "$OPENCLAW_REPO_DIR"
+    fi
+
+    # Determine which ref to check out
+    if [[ -n "$OPENCLAW_BRANCH" ]]; then
+        info "Using specified ref: $OPENCLAW_BRANCH"
+        git checkout "$OPENCLAW_BRANCH"
+    else
+        # Auto-detect latest release tag (sorted by version number)
+        LATEST_TAG="$(git tag -l --sort=-version:refname | head -n 1)"
+        if [[ -z "$LATEST_TAG" ]]; then
+            error "No release tags found. Falling back to main."
+            OPENCLAW_BRANCH="main"
+            git checkout main
+        else
+            OPENCLAW_BRANCH="$LATEST_TAG"
+            info "Latest release tag: $LATEST_TAG"
+            git checkout "$LATEST_TAG"
+        fi
     fi
 else
     info "Skipping clone (--skip-clone)"
@@ -114,11 +131,28 @@ cd "$OPENCLAW_REPO_DIR"
 echo ""
 info "Build configuration:"
 echo "  Repo:        $OPENCLAW_REPO_DIR"
+echo "  Version:     $OPENCLAW_BRANCH"
 echo "  Image:       $OPENCLAW_IMAGE"
 echo "  Extensions:  $OPENCLAW_EXTENSIONS"
 echo "  Apt packages: $OPENCLAW_DOCKER_APT_PACKAGES"
 echo "  Gateway bind: $OPENCLAW_GATEWAY_BIND"
 echo ""
 
+# Build a versioned image name if we have a tag
+OPENCLAW_IMAGE_BASE="${OPENCLAW_IMAGE%%:*}"
+OPENCLAW_IMAGE_TAG="${OPENCLAW_IMAGE#*:}"
+if [[ "$OPENCLAW_BRANCH" =~ ^v?[0-9] ]]; then
+    export OPENCLAW_IMAGE="${OPENCLAW_IMAGE_BASE}:${OPENCLAW_BRANCH}"
+fi
+
 info "Running docker-setup.sh ..."
-exec ./docker-setup.sh
+./docker-setup.sh
+
+# Tag as latest
+LATEST_IMAGE="${OPENCLAW_IMAGE_BASE}:latest"
+info "Tagging $OPENCLAW_IMAGE as $LATEST_IMAGE"
+docker tag "$OPENCLAW_IMAGE" "$LATEST_IMAGE"
+
+info "Done. Images available:"
+echo "  $OPENCLAW_IMAGE"
+echo "  $LATEST_IMAGE"
