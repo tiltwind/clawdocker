@@ -142,33 +142,25 @@ cmd_create() {
     local port
     port=$(prompt_input "Host port" "18789")
 
-    # 4. Provider protocol
-    local provider
-    provider=$(prompt_choice "Provider protocol" "openai" "openai" "anthropic")
-
-    # 5. Base URL
-    local default_baseurl
-    if [[ "$provider" == "openai" ]]; then
-        default_baseurl="https://api.openai.com/v1"
-    else
-        default_baseurl="https://api.anthropic.com"
+    # Check port conflict against registered instances
+    if [[ -f "$INSTANCES_REGISTRY" ]]; then
+        while IFS='|' read -r reg_name reg_path; do
+            if [[ -f "$reg_path/instance.conf" ]]; then
+                local reg_port
+                reg_port=$(grep '^PORT=' "$reg_path/instance.conf" 2>/dev/null | cut -d= -f2)
+                if [[ "$reg_port" == "$port" && "$reg_name" != "$name" ]]; then
+                    error "Port ${port} is already used by instance '${reg_name}' (${reg_path})"
+                    exit 1
+                fi
+            fi
+        done < "$INSTANCES_REGISTRY"
     fi
-    local baseurl
-    baseurl=$(prompt_input "API Base URL" "$default_baseurl")
 
-    # 6. API Key
-    local apikey
-    apikey=$(prompt_input "API Key" "")
-
-    # 7. Model
-    local default_model
-    if [[ "$provider" == "openai" ]]; then
-        default_model="gpt-4o"
-    else
-        default_model="claude-sonnet-4-20250514"
+    # Check port conflict against running processes
+    if lsof -iTCP:"$port" -sTCP:LISTEN -t &>/dev/null; then
+        error "Port ${port} is already in use by another process"
+        exit 1
     fi
-    local model
-    model=$(prompt_input "Model" "$default_model")
 
     # ─── Generate files ───────────────────────────────────────────────────────
 
@@ -195,97 +187,23 @@ volumes:
 EOF
 
     # --- .env ---
-    if [[ "$provider" == "openai" ]]; then
-        cat > "$instance_path/.env" << EOF
-OPENAI_API_KEY=${apikey}
+    cat > "$instance_path/.env" << EOF
 OPENCLAW_GATEWAY_TOKEN=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | xxd -p | head -c 32)
 EOF
-    else
-        cat > "$instance_path/.env" << EOF
-ANTHROPIC_API_KEY=${apikey}
-OPENCLAW_GATEWAY_TOKEN=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | xxd -p | head -c 32)
-EOF
-    fi
 
-    # --- openclaw.json ---
-    # Uses agents.defaults.* format (agent.* is legacy, see openclaw doctor)
-    if [[ "$provider" == "openai" ]]; then
-        cat > "$instance_path/config/openclaw.json" << EOF
+    # --- openclaw.json (minimal, configure via openclaw setup after start) ---
+    cat > "$instance_path/config/openclaw.json" << 'EOF'
 {
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "openai-compatible/${model}"
-      },
-      "providers": {
-        "openai-compatible": {
-          "baseUrl": "${baseurl}"
-        }
-      },
-      "workspace": "~/.openclaw/workspace"
-    }
-  },
   "gateway": {
     "port": 18789
   }
 }
-EOF
-    else
-        cat > "$instance_path/config/openclaw.json" << EOF
-{
-  "agents": {
-    "defaults": {
-      "model": {
-        "primary": "anthropic/${model}"
-      },
-      "providers": {
-        "anthropic": {
-          "baseUrl": "${baseurl}"
-        }
-      },
-      "workspace": "~/.openclaw/workspace"
-    }
-  },
-  "gateway": {
-    "port": 18789
-  }
-}
-EOF
-    fi
-
-    # --- Workspace files ---
-    cat > "$instance_path/config/workspace/AGENTS.md" << 'EOF'
-## Rules
-
-- Confirm before executing destructive commands
-- Reply in the user's language
-- Keep responses concise and actionable
-
-## Priority
-
-1. Safety > Efficiency > Convenience
-2. Prefer existing tools over installing new dependencies
-EOF
-
-    cat > "$instance_path/config/workspace/SOUL.md" << 'EOF'
-## Personality
-
-You are an efficient and professional assistant. Be concise, direct, and helpful.
-
-## Boundaries
-
-- Do not execute destructive operations without explicit confirmation
-- Do not access or transmit sensitive data
-- Ask for clarification when uncertain
 EOF
 
     # --- instance.conf (metadata) ---
     cat > "$instance_path/instance.conf" << EOF
 NAME=${name}
 PORT=${port}
-PROVIDER=${provider}
-BASE_URL=${baseurl}
-MODEL=${model}
 CREATED=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 EOF
 
@@ -295,13 +213,12 @@ EOF
     echo ""
     info "Instance '${name}' created successfully!"
     echo ""
-    echo "  Path:     $instance_path"
-    echo "  Port:     $port"
-    echo "  Provider: $provider"
-    echo "  Model:    $model"
+    echo "  Path:  $instance_path"
+    echo "  Port:  $port"
     echo ""
-    echo "  Start with:  $(color_cyan "$0 start $instance_path")"
-    echo "         or:   $(color_cyan "$0 start $name")"
+    echo "  Next steps:"
+    echo "    1. Start:     $(color_cyan "$0 start $name")"
+    echo "    2. Configure: $(color_cyan "$0 exec $name openclaw setup")"
     echo ""
 }
 
@@ -324,9 +241,22 @@ cmd_start() {
     local project
     project=$(get_compose_project "$instance_path")
 
+    # Check port conflict before starting
+    local port
+    port=$(grep -oP '"\K\d+(?=:18789")' "$instance_path/docker-compose.yml" 2>/dev/null || echo "")
+    if [[ -n "$port" ]] && lsof -iTCP:"$port" -sTCP:LISTEN -t &>/dev/null; then
+        error "Port ${port} is already in use. Cannot start instance."
+        error "Stop the conflicting process or change the port in: $instance_path/docker-compose.yml"
+        exit 1
+    fi
+
     info "Starting instance at: $instance_path (project: $project)"
-    cd "$instance_path" && docker compose -p "$project" up -d
-    info "Instance started. Gateway port: $(grep -oP '"\K\d+(?=:18789")' "$instance_path/docker-compose.yml" 2>/dev/null || echo 'unknown')"
+    if ! cd "$instance_path" || ! docker compose -p "$project" up -d; then
+        error "Failed to start instance. Cleaning up containers..."
+        docker compose -p "$project" down 2>/dev/null || true
+        exit 1
+    fi
+    info "Instance started. Gateway port: ${port:-unknown}"
 }
 
 cmd_stop() {
@@ -422,17 +352,15 @@ cmd_list() {
     fi
 
     echo ""
-    printf "$(color_cyan '%-20s %-50s %-8s %-12s %s')\n" "NAME" "PATH" "PORT" "PROVIDER" "MODEL"
-    echo "────────────────────────────────────────────────────────────────────────────────────────────────────"
+    printf "$(color_cyan '%-20s %-50s %-8s')\n" "NAME" "PATH" "PORT"
+    echo "──────────────────────────────────────────────────────────────────────────────────"
 
     while IFS='|' read -r inst_name inst_path; do
-        local port="?" provider="?" model="?"
+        local port="?"
         if [[ -f "$inst_path/instance.conf" ]]; then
             port=$(grep '^PORT=' "$inst_path/instance.conf" 2>/dev/null | cut -d= -f2 || echo "?")
-            provider=$(grep '^PROVIDER=' "$inst_path/instance.conf" 2>/dev/null | cut -d= -f2 || echo "?")
-            model=$(grep '^MODEL=' "$inst_path/instance.conf" 2>/dev/null | cut -d= -f2 || echo "?")
         fi
-        printf "%-20s %-50s %-8s %-12s %s\n" "$inst_name" "$inst_path" "$port" "$provider" "$model"
+        printf "%-20s %-50s %-8s\n" "$inst_name" "$inst_path" "$port"
     done < "$INSTANCES_REGISTRY"
     echo ""
 }
