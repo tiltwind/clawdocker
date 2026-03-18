@@ -84,3 +84,13 @@ openclaw status
 # 打开控制面板（会输出 token URL）
 openclaw dashboard
 ```
+
+## 卸载 OpenClaw
+
+### 一键卸载
+
+```bash
+bash clear_openclaw.sh
+```
+
+> 如果不再需要 Node.js，可额外执行 `sudo apt remove -y nodejs && sudo apt autoremove -y` 卸载。
