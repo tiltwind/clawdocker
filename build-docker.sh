@@ -138,21 +138,24 @@ echo "  Apt packages: $OPENCLAW_DOCKER_APT_PACKAGES"
 echo "  Gateway bind: $OPENCLAW_GATEWAY_BIND"
 echo ""
 
-# Build a versioned image name if we have a tag
 OPENCLAW_IMAGE_BASE="${OPENCLAW_IMAGE%%:*}"
-OPENCLAW_IMAGE_TAG="${OPENCLAW_IMAGE#*:}"
-if [[ "$OPENCLAW_BRANCH" =~ ^v?[0-9] ]]; then
-    export OPENCLAW_IMAGE="${OPENCLAW_IMAGE_BASE}:${OPENCLAW_BRANCH}"
-fi
 
 info "Running docker-setup.sh ..."
 ./docker-setup.sh
 
-# Tag as latest
-LATEST_IMAGE="${OPENCLAW_IMAGE_BASE}:latest"
-info "Tagging $OPENCLAW_IMAGE as $LATEST_IMAGE"
-docker tag "$OPENCLAW_IMAGE" "$LATEST_IMAGE"
+# Tag with version and latest
+TAGS=("${OPENCLAW_IMAGE_BASE}:latest")
+if [[ "$OPENCLAW_BRANCH" =~ ^v?[0-9] ]]; then
+    TAGS+=("${OPENCLAW_IMAGE_BASE}:${OPENCLAW_BRANCH}")
+fi
+
+for tag in "${TAGS[@]}"; do
+    info "Tagging $OPENCLAW_IMAGE -> $tag"
+    docker tag "$OPENCLAW_IMAGE" "$tag"
+done
 
 info "Done. Images available:"
 echo "  $OPENCLAW_IMAGE"
-echo "  $LATEST_IMAGE"
+for tag in "${TAGS[@]}"; do
+    echo "  $tag"
+done
