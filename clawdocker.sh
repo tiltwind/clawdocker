@@ -12,6 +12,8 @@ set -euo pipefail
 #   clawdocker.sh list                - List all instances
 #   clawdocker.sh remove <path|name>  - Remove an instance (stop, delete, unregister)
 #   clawdocker.sh exec   <path|name> <command...> - Execute a command inside the container
+#   clawdocker.sh buildimage [--skip-clone]      - Clone/update OpenClaw repo and build Docker image
+#   clawdocker.sh uninstall                       - Uninstall OpenClaw (systemd, CLI, config)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTANCES_REGISTRY="${SCRIPT_DIR}/.instances"
@@ -184,6 +186,7 @@ cmd_create() {
 
     info "Creating instance at: $instance_path"
     mkdir -p "$instance_path/config/workspace"
+    mkdir -p "$instance_path/home"
 
     # --- docker-compose.yml ---
     cat > "$instance_path/docker-compose.yml" << EOF
@@ -196,12 +199,9 @@ services:
       - "127.0.0.1:${port}:18789"
     volumes:
       - ./config:/home/node/.openclaw:rw
-      - ${name}_home:/home/node
+      - ./home:/home/node
     env_file:
       - .env
-
-volumes:
-  ${name}_home:
 EOF
 
     # --- .env ---
@@ -218,9 +218,11 @@ EOF
 }
 EOF
 
-    # Ensure container's node user (uid 1000) can read/write/create in config
+    # Ensure container's node user (uid 1000) can read/write/create
     chown -R 1000:1000 "$instance_path/config" 2>/dev/null || true
     chmod -R 700 "$instance_path/config"
+    chown -R 1000:1000 "$instance_path/home" 2>/dev/null || true
+    chmod -R 700 "$instance_path/home"
 
     # --- instance.conf (metadata) ---
     cat > "$instance_path/instance.conf" << EOF
@@ -483,6 +485,216 @@ cmd_remove() {
     info "Instance '${name}' removed."
 }
 
+cmd_uninstall() {
+    echo ""
+    echo "$(color_red '╔══════════════════════════════════════════╗')"
+    echo "$(color_red '║')   OpenClaw Uninstaller                    $(color_red '║')"
+    echo "$(color_red '╚══════════════════════════════════════════╝')"
+    echo ""
+    warn "This will perform the following actions:"
+    echo "  1. Stop and remove systemd service (openclaw-gateway)"
+    echo "  2. Uninstall OpenClaw CLI (npm uninstall -g openclaw)"
+    echo "  3. Remove config files (~/.openclaw, ~/.config/openclaw)"
+    echo ""
+
+    local confirm
+    read -rp "$(color_red 'Are you sure you want to uninstall OpenClaw? (y/N): ')" confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        info "Aborted."
+        return 0
+    fi
+
+    # Second confirmation
+    read -rp "$(color_red 'This action is irreversible. Type "UNINSTALL" to confirm: ')" confirm
+    if [[ "$confirm" != "UNINSTALL" ]]; then
+        info "Aborted."
+        return 0
+    fi
+
+    echo ""
+
+    # STEP 1. Stop and remove systemd service
+    info "[1/4] Stopping and removing systemd service..."
+    if systemctl --user stop openclaw-gateway 2>/dev/null; then
+        echo "  Stopped openclaw-gateway"
+    else
+        echo "  Service not running, skipped"
+    fi
+    if systemctl --user disable openclaw-gateway 2>/dev/null; then
+        echo "  Disabled auto-start"
+    else
+        echo "  Service not enabled, skipped"
+    fi
+    rm -f ~/.config/systemd/user/openclaw-gateway.service
+    systemctl --user daemon-reload 2>/dev/null || true
+    echo "  systemd config reloaded"
+
+    # STEP 2. Uninstall OpenClaw CLI
+    info "[2/4] Uninstalling OpenClaw CLI..."
+    if command -v openclaw &>/dev/null; then
+        npm uninstall -g openclaw
+        echo "  openclaw uninstalled"
+    else
+        echo "  openclaw not installed, skipped"
+    fi
+
+    # STEP 3. Clean up config files
+    info "[3/4] Cleaning up config files..."
+    rm -rf ~/.openclaw
+    rm -rf ~/.config/openclaw
+    echo "  Config files removed"
+
+    # STEP 4. Verify
+    info "[4/4] Verifying uninstall..."
+    hash -r 2>/dev/null
+    if which openclaw 2>/dev/null | grep -q openclaw; then
+        warn "openclaw command still exists: $(which openclaw)"
+    else
+        echo "  openclaw command removed"
+    fi
+
+    if systemctl --user list-unit-files openclaw-gateway.service 2>/dev/null | grep -q openclaw-gateway; then
+        warn "openclaw-gateway service still exists"
+    else
+        echo "  openclaw-gateway service removed"
+    fi
+
+    echo ""
+    info "Uninstall complete."
+    echo "To also uninstall Node.js, run: sudo apt remove -y nodejs && sudo apt autoremove -y"
+}
+
+cmd_build_image() {
+    # ─── Configuration ──────────────────────────────────────────────────────
+    OPENCLAW_REPO_URL="${OPENCLAW_REPO_URL:-https://github.com/openclaw/openclaw.git}"
+    OPENCLAW_REPO_DIR="${OPENCLAW_REPO_DIR:-/opt/openclaw}"
+    OPENCLAW_BRANCH="${OPENCLAW_BRANCH:-}"  # empty = auto-detect latest release tag
+
+    # Extensions to include (space-separated)
+    export OPENCLAW_EXTENSIONS="${OPENCLAW_EXTENSIONS:-acpx bluebubbles diagnostics-otel feishu irc lobster matrix mattermost msteams nextcloud-talk nostr synology-chat twitch voice-call zalo zalouser}"
+
+    # Extra apt packages to install in the image
+    export OPENCLAW_DOCKER_APT_PACKAGES="${OPENCLAW_DOCKER_APT_PACKAGES:-ffmpeg build-essential git curl jq}"
+
+    # Image name
+    export OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw:local}"
+
+    # ─── Parse args ─────────────────────────────────────────────────────────
+    local SKIP_CLONE=false
+    for arg in "$@"; do
+        case "$arg" in
+            --skip-clone) SKIP_CLONE=true ;;
+            --help|-h)
+                echo "Usage: $0 buildimage [--skip-clone]"
+                echo ""
+                echo "Environment variables:"
+                echo "  OPENCLAW_REPO_URL          Git repo URL (default: github.com/openclaw/openclaw)"
+                echo "  OPENCLAW_REPO_DIR          Local repo path (default: /opt/openclaw)"
+                echo "  OPENCLAW_BRANCH            Git branch/tag (default: latest release tag)"
+                echo "  OPENCLAW_EXTENSIONS        Extensions to include"
+                echo "  OPENCLAW_DOCKER_APT_PACKAGES  Extra apt packages (default: ffmpeg build-essential git curl jq)"
+                echo "  OPENCLAW_IMAGE             Docker image name (default: openclaw:local)"
+                return 0
+                ;;
+            *)
+                error "Unknown argument: $arg"
+                return 1
+                ;;
+        esac
+    done
+
+    # ─── Pre-checks ─────────────────────────────────────────────────────────
+    if ! command -v docker &>/dev/null; then
+        error "Docker is not installed. Please install Docker first."
+        return 1
+    fi
+
+    if ! command -v git &>/dev/null; then
+        error "Git is not installed."
+        return 1
+    fi
+
+    # ─── Clone / Update repo ────────────────────────────────────────────────
+    if [[ "$SKIP_CLONE" == false ]]; then
+        if [[ -d "$OPENCLAW_REPO_DIR/.git" ]]; then
+            info "Updating existing repo at: $OPENCLAW_REPO_DIR"
+            cd "$OPENCLAW_REPO_DIR"
+            git fetch origin --tags
+        else
+            info "Cloning OpenClaw to: $OPENCLAW_REPO_DIR"
+            mkdir -p "$(dirname "$OPENCLAW_REPO_DIR")"
+            git clone "$OPENCLAW_REPO_URL" "$OPENCLAW_REPO_DIR"
+            cd "$OPENCLAW_REPO_DIR"
+        fi
+
+        # Determine which ref to check out
+        if [[ -n "$OPENCLAW_BRANCH" ]]; then
+            info "Using specified ref: $OPENCLAW_BRANCH"
+            git checkout "$OPENCLAW_BRANCH"
+        else
+            # Auto-detect latest stable release tag (exclude beta/rc/alpha/dev)
+            local LATEST_TAG
+            LATEST_TAG="$(git tag -l --sort=-version:refname | grep -v -iE '(alpha|beta|rc|dev|pre)' | head -n 1)"
+            if [[ -z "$LATEST_TAG" ]]; then
+                error "No release tags found. Falling back to main."
+                OPENCLAW_BRANCH="main"
+                git checkout main
+            else
+                OPENCLAW_BRANCH="$LATEST_TAG"
+                info "Latest release tag: $LATEST_TAG"
+                git checkout "$LATEST_TAG"
+            fi
+        fi
+    else
+        info "Skipping clone (--skip-clone)"
+    fi
+
+    if [[ ! -f "$OPENCLAW_REPO_DIR/Dockerfile" ]]; then
+        error "Dockerfile not found at: $OPENCLAW_REPO_DIR"
+        error "Is OPENCLAW_REPO_DIR set correctly?"
+        return 1
+    fi
+
+    # ─── Build ──────────────────────────────────────────────────────────────
+    cd "$OPENCLAW_REPO_DIR"
+
+    echo ""
+    info "Build configuration:"
+    echo "  Repo:        $OPENCLAW_REPO_DIR"
+    echo "  Version:     $OPENCLAW_BRANCH"
+    echo "  Image:       $OPENCLAW_IMAGE"
+    echo "  Extensions:  $OPENCLAW_EXTENSIONS"
+    echo "  Apt packages: $OPENCLAW_DOCKER_APT_PACKAGES"
+    echo ""
+
+    local OPENCLAW_IMAGE_BASE="${OPENCLAW_IMAGE%%:*}"
+
+    info "Building Docker image ..."
+    docker build \
+        --build-arg OPENCLAW_EXTENSIONS="$OPENCLAW_EXTENSIONS" \
+        --build-arg OPENCLAW_DOCKER_APT_PACKAGES="$OPENCLAW_DOCKER_APT_PACKAGES" \
+        -t "$OPENCLAW_IMAGE" \
+        -f Dockerfile \
+        .
+
+    # Tag with version and latest
+    local TAGS=("${OPENCLAW_IMAGE_BASE}:latest")
+    if [[ "$OPENCLAW_BRANCH" =~ ^v?[0-9] ]]; then
+        TAGS+=("${OPENCLAW_IMAGE_BASE}:${OPENCLAW_BRANCH}")
+    fi
+
+    for tag in "${TAGS[@]}"; do
+        info "Tagging $OPENCLAW_IMAGE -> $tag"
+        docker tag "$OPENCLAW_IMAGE" "$tag"
+    done
+
+    info "Done. Images available:"
+    echo "  $OPENCLAW_IMAGE"
+    for tag in "${TAGS[@]}"; do
+        echo "  $tag"
+    done
+}
+
 cmd_help() {
     echo ""
     echo "$(color_green 'clawdocker') - OpenClaw Docker Instance Manager"
@@ -497,6 +709,8 @@ cmd_help() {
     echo "  $0 $(color_cyan 'list')                 List all registered instances"
     echo "  $0 $(color_cyan 'remove')  <path|name>  Remove an instance (stop, delete files, unregister)"
     echo "  $0 $(color_cyan 'exec')    <path|name> <cmd...>  Execute a command inside the container"
+    echo "  $0 $(color_cyan 'buildimage') [--skip-clone]   Clone/update OpenClaw repo and build Docker image"
+    echo "  $0 $(color_cyan 'uninstall')                  Uninstall OpenClaw (systemd, CLI, config)"
     echo ""
 }
 
@@ -514,7 +728,9 @@ case "$command" in
     logs)    cmd_logs "$@" ;;
     list)    cmd_list "$@" ;;
     remove)  cmd_remove "$@" ;;
-    exec)    cmd_exec "$@" ;;
+    exec)        cmd_exec "$@" ;;
+    buildimage) cmd_build_image "$@" ;;
+    uninstall)   cmd_uninstall "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
         error "Unknown command: $command"
