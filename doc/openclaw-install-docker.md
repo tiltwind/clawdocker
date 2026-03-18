@@ -78,18 +78,8 @@ docker compose up -d
 
 > **与[多 Agent 配置](openclaw-multi-agent.md)的区别**：多 Agent 是单个 Gateway 进程内运行多个 Agent（共享进程，配置级隔离）；多实例是启动多个独立的 Gateway 进程（进程级隔离，各自独立的端口、配置和数据）。
 
-### STEP 1. 创建各实例目录
 
-```bash
-# 实例 1：工作助手（使用 Kimi / Moonshot AI）
-mkdir -p /opt/openclaw-instances/kimi
-# 实例 2：学习助手（使用 MiniMax）
-mkdir -p /opt/openclaw-instances/minimax
-# 实例 3：代码助手（使用 DeepSeek）
-mkdir -p /opt/openclaw-instances/deepseek
-```
-
-### STEP 2. 使用 clawdocker.sh 创建实例
+### STEP 1. 使用 clawdocker.sh 创建实例
 
 使用 `clawdocker.sh` 交互式创建实例，只需输入名称、目录和端口：
 
@@ -103,7 +93,7 @@ cd /opt/openclaw-instances
 # Host port: 18789
 ```
 
-### STEP 3. 启动并配置
+### STEP 2. 启动并配置
 
 ```bash
 # 启动实例
@@ -113,7 +103,7 @@ cd /opt/openclaw-instances
 ./clawdocker.sh exec deepseek openclaw setup
 ```
 
-### STEP 4. 常用管理命令
+### STEP 3. 常用管理命令
 
 ```bash
 # 查看实例状态
@@ -122,9 +112,10 @@ cd /opt/openclaw-instances
 # 查看日志
 ./clawdocker.sh logs deepseek
 
-# 停止 / 重启实例
+# 停止 / 重启 / 删除实例
 ./clawdocker.sh stop deepseek
 ./clawdocker.sh restart deepseek
+./clawdocker.sh remove deepseek
 
 # 列出所有已注册的实例
 ./clawdocker.sh list

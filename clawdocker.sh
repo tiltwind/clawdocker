@@ -10,6 +10,7 @@ set -euo pipefail
 #   clawdocker.sh status [path]       - Show instance status
 #   clawdocker.sh logs   [path]       - Tail instance logs
 #   clawdocker.sh list                - List all instances
+#   clawdocker.sh remove <path|name>  - Remove an instance (stop, delete, unregister)
 #   clawdocker.sh exec   <path|name> <command...> - Execute a command inside the container
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -199,6 +200,9 @@ EOF
   }
 }
 EOF
+
+    # Ensure container's node user (uid 1000) can read/write/create in config
+    chmod -R a+rwX "$instance_path/config"
 
     # --- instance.conf (metadata) ---
     cat > "$instance_path/instance.conf" << EOF
@@ -410,6 +414,55 @@ cmd_exec() {
     docker exec -it "$container_name" "$@"
 }
 
+cmd_remove() {
+    local input="${1:-}"
+    if [[ -z "$input" ]]; then
+        error "Usage: $0 remove <path|name>"
+        exit 1
+    fi
+
+    local instance_path
+    instance_path=$(resolve_instance_path "$input")
+    local name
+    name=$(basename "$instance_path")
+
+    if [[ ! -d "$instance_path" ]]; then
+        error "Instance directory not found: $instance_path"
+        exit 1
+    fi
+
+    # Confirm with user
+    warn "This will stop and remove instance '${name}' at: $instance_path"
+    warn "  - Stop and remove containers and networks"
+    warn "  - Delete instance directory: $instance_path"
+    local confirm
+    read -rp "$(color_red 'Are you sure? (y/N): ')" confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        info "Aborted."
+        exit 0
+    fi
+
+    # Stop and remove containers, networks, volumes
+    local project
+    project=$(get_compose_project "$instance_path")
+    if [[ -f "$instance_path/docker-compose.yml" ]]; then
+        info "Stopping and removing containers..."
+        cd "$instance_path" && docker compose -p "$project" down -v 2>/dev/null || true
+    fi
+
+    # Remove instance directory
+    info "Removing instance directory: $instance_path"
+    rm -rf "$instance_path"
+
+    # Unregister from instances registry
+    if [[ -f "$INSTANCES_REGISTRY" ]]; then
+        grep -v "|${instance_path}$" "$INSTANCES_REGISTRY" > "${INSTANCES_REGISTRY}.tmp" 2>/dev/null || true
+        mv "${INSTANCES_REGISTRY}.tmp" "$INSTANCES_REGISTRY"
+    fi
+
+    info "Instance '${name}' removed."
+}
+
 cmd_help() {
     echo ""
     echo "$(color_green 'clawdocker') - OpenClaw Docker Instance Manager"
@@ -422,6 +475,7 @@ cmd_help() {
     echo "  $0 $(color_cyan 'status')  <path|name>  Show instance status"
     echo "  $0 $(color_cyan 'logs')    <path|name>  Tail instance logs"
     echo "  $0 $(color_cyan 'list')                 List all registered instances"
+    echo "  $0 $(color_cyan 'remove')  <path|name>  Remove an instance (stop, delete files, unregister)"
     echo "  $0 $(color_cyan 'exec')    <path|name> <cmd...>  Execute a command inside the container"
     echo ""
 }
@@ -439,6 +493,7 @@ case "$command" in
     status)  cmd_status "$@" ;;
     logs)    cmd_logs "$@" ;;
     list)    cmd_list "$@" ;;
+    remove)  cmd_remove "$@" ;;
     exec)    cmd_exec "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
