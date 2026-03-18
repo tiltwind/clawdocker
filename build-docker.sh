@@ -25,9 +25,6 @@ export OPENCLAW_EXTENSIONS="${OPENCLAW_EXTENSIONS:-acpx bluebubbles diagnostics-
 # Extra apt packages to install in the image
 export OPENCLAW_DOCKER_APT_PACKAGES="${OPENCLAW_DOCKER_APT_PACKAGES:-ffmpeg build-essential git curl jq}"
 
-# Gateway defaults
-export OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-lan}"
-
 # Image name
 export OPENCLAW_IMAGE="${OPENCLAW_IMAGE:-openclaw:local}"
 
@@ -55,7 +52,6 @@ for arg in "$@"; do
             echo "  OPENCLAW_BRANCH            Git branch/tag (default: latest release tag)"
             echo "  OPENCLAW_EXTENSIONS        Extensions to include (default: nostr)"
             echo "  OPENCLAW_DOCKER_APT_PACKAGES  Extra apt packages (default: ffmpeg build-essential git curl jq)"
-            echo "  OPENCLAW_GATEWAY_BIND      Gateway bind mode (default: lan)"
             echo "  OPENCLAW_IMAGE             Docker image name (default: openclaw:local)"
             exit 0
             ;;
@@ -70,11 +66,6 @@ done
 
 if ! command -v docker &>/dev/null; then
     error "Docker is not installed. Please install Docker first."
-    exit 1
-fi
-
-if ! docker compose version &>/dev/null; then
-    error "Docker Compose plugin is not available."
     exit 1
 fi
 
@@ -118,8 +109,8 @@ else
     info "Skipping clone (--skip-clone)"
 fi
 
-if [[ ! -f "$OPENCLAW_REPO_DIR/docker-setup.sh" ]]; then
-    error "docker-setup.sh not found at: $OPENCLAW_REPO_DIR"
+if [[ ! -f "$OPENCLAW_REPO_DIR/Dockerfile" ]]; then
+    error "Dockerfile not found at: $OPENCLAW_REPO_DIR"
     error "Is OPENCLAW_REPO_DIR set correctly?"
     exit 1
 fi
@@ -135,13 +126,17 @@ echo "  Version:     $OPENCLAW_BRANCH"
 echo "  Image:       $OPENCLAW_IMAGE"
 echo "  Extensions:  $OPENCLAW_EXTENSIONS"
 echo "  Apt packages: $OPENCLAW_DOCKER_APT_PACKAGES"
-echo "  Gateway bind: $OPENCLAW_GATEWAY_BIND"
 echo ""
 
 OPENCLAW_IMAGE_BASE="${OPENCLAW_IMAGE%%:*}"
 
-info "Running docker-setup.sh ..."
-./docker-setup.sh
+info "Building Docker image ..."
+docker build \
+    --build-arg OPENCLAW_EXTENSIONS="$OPENCLAW_EXTENSIONS" \
+    --build-arg OPENCLAW_DOCKER_APT_PACKAGES="$OPENCLAW_DOCKER_APT_PACKAGES" \
+    -t "$OPENCLAW_IMAGE" \
+    -f Dockerfile \
+    .
 
 # Tag with version and latest
 TAGS=("${OPENCLAW_IMAGE_BASE}:latest")
